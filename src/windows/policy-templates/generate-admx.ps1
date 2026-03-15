@@ -29,16 +29,16 @@ $XSI_NS       = 'http://www.w3.org/2001/XMLSchema-instance'
 $XMLNS_NS     = 'http://www.w3.org/2000/xmlns/'
 
 $categories = @(
-    [ordered]@{ Name = 'GitCredentialManager'; Display = 'Git Credential Manager'; Parent = $null }
-    [ordered]@{ Name = 'GCM_General';          Display = 'General';                Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_Tracing';          Display = 'Tracing';                Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_Credentials';      Display = 'Credential Storage';     Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_Authentication';   Display = 'Authentication';         Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_AzureRepos';       Display = 'Azure Repos';            Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_GitHub';           Display = 'GitHub';                 Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_Bitbucket';        Display = 'Bitbucket';              Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_GitLab';           Display = 'GitLab';                 Parent = 'GitCredentialManager' }
-    [ordered]@{ Name = 'GCM_Trace2';           Display = 'Trace2';                 Parent = 'GitCredentialManager' }
+    [ordered]@{ Name = 'GitCredentialManager'; Display = 'Git Credential Manager'; Parent = $null;                  Pattern = $null }
+    [ordered]@{ Name = 'GCM_Trace2';           Display = 'Trace2';                 Parent = 'GitCredentialManager'; Pattern = '^trace2\.' }
+    [ordered]@{ Name = 'GCM_Tracing';          Display = 'Tracing';                Parent = 'GitCredentialManager'; Pattern = '\.trace' }
+    [ordered]@{ Name = 'GCM_Credentials';      Display = 'Credential Storage';     Parent = 'GitCredentialManager'; Pattern = 'Store(Path)?$|\.cacheOptions$' }
+    [ordered]@{ Name = 'GCM_Authentication';   Display = 'Authentication';         Parent = 'GitCredentialManager'; Pattern = '\.msauth' }
+    [ordered]@{ Name = 'GCM_AzureRepos';       Display = 'Azure Repos';            Parent = 'GitCredentialManager'; Pattern = '\.azrepos' }
+    [ordered]@{ Name = 'GCM_GitHub';           Display = 'GitHub';                 Parent = 'GitCredentialManager'; Pattern = '\.github' }
+    [ordered]@{ Name = 'GCM_Bitbucket';        Display = 'Bitbucket';              Parent = 'GitCredentialManager'; Pattern = '\.bitbucket' }
+    [ordered]@{ Name = 'GCM_GitLab';           Display = 'GitLab';                 Parent = 'GitCredentialManager'; Pattern = '\.gitlab' }
+    [ordered]@{ Name = 'GCM_General';          Display = 'General';                Parent = 'GitCredentialManager'; Pattern = $null }
 )
 
 function New-XmlWriter {
@@ -62,16 +62,15 @@ function Write-AdmlString {
 $content = Get-Content -LiteralPath $ConfigurationMd -Raw
 $settings = [System.Collections.Generic.List[hashtable]]::new()
 
-# Match every credential.* and trace2.* setting heading plus the description
-# paragraph that immediately follows it (up to the first subheading, horizontal
-# rule, or end of file).
-$pattern = '(?ms)^### ((?:credential|trace2)\.(\S+?))(?:\s+_\([^)]+\)_)* *\n\n(.*?)(?=\n####|\n---|\Z)'
+# Match any namespace.setting heading plus the description paragraph that
+# immediately follows it (up to the first subheading, horizontal rule, or EOF).
+$pattern = '(?ms)^### ((\w+)\.(\S+?))(?:\s+_\([^)]+\)_)* *\n\n(.*?)(?=\n####|\n---|\Z)'
 foreach ($m in [regex]::Matches($content, $pattern)) {
     $fullKey   = $m.Groups[1].Value
-    $valueName = $m.Groups[2].Value
-    $namespace = ($fullKey -split '\.')[0]
+    $namespace = $m.Groups[2].Value
+    $valueName = $m.Groups[3].Value
 
-    $plain = $m.Groups[3].Value `
+    $plain = $m.Groups[4].Value `
         -replace '(?ms)```[^`]*?```', '' `
         -replace '`([^`]+)`',              '$1' `
         -replace '\[([^\]]+)\]\[[^\]]*\]', '$1' `
@@ -84,7 +83,7 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
         -replace '(?<![_\w])_(.+?)_(?![_\w])',    '$1' `
         -replace '(?m)^> ?',               '' `
         -replace '(?m)^[\-|: ]+$',         '' `
-        -replace '\|',                     '  '
+        -replace '\|',                     ': '
     $plain = ($plain -split '\r?\n' | ForEach-Object { $_.TrimEnd() }) -join "`n"
     $plain = [regex]::Replace($plain, '\n{3,}', "`n`n").Trim()
 
@@ -102,19 +101,8 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
     $displayName = [regex]::Replace($valueName, '(?<=[a-z0-9])(?=[A-Z])', ' ')
     $displayName = $displayName.Substring(0,1).ToUpper() + $displayName.Substring(1)
 
-    $category = if ($namespace -eq 'trace2') { 'GCM_Trace2' }
-                else {
-                    switch -Regex ($valueName) {
-                        '^trace'                       { 'GCM_Tracing' }
-                        '^msauth'                      { 'GCM_Authentication' }
-                        '^azrepos'                     { 'GCM_AzureRepos' }
-                        '^github'                      { 'GCM_GitHub' }
-                        '^bitbucket'                   { 'GCM_Bitbucket' }
-                        '^gitlab'                      { 'GCM_GitLab' }
-                        'Store(Path)?$|^cacheOptions$' { 'GCM_Credentials' }
-                        default                        { 'GCM_General' }
-                    }
-                }
+    $matched  = $categories | Where-Object { $_.Pattern -and $fullKey -match $_.Pattern } | Select-Object -First 1
+    $category = if ($matched) { $matched.Name } else { 'GCM_General' }
 
     $settings.Add(@{
         PolicyName  = $policyName
@@ -127,7 +115,6 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
 
 Write-Host "Parsed $($settings.Count) settings from $(Split-Path $ConfigurationMd -Leaf)"
 
-# Generate ADMX
 $admxPath = Join-Path $OutputDir 'GitCredentialManager.admx'
 $xw = New-XmlWriter $admxPath
 
@@ -215,7 +202,6 @@ $xw.Close()
 
 Write-Host "Written: $admxPath"
 
-# Generate ADML
 $enUsDir = Join-Path $OutputDir 'en-US'
 if (-not (Test-Path $enUsDir)) { New-Item -ItemType Directory -Path $enUsDir | Out-Null }
 $admlPath = Join-Path $enUsDir 'GitCredentialManager.adml'
