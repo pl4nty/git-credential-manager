@@ -76,7 +76,34 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
     $namespace = $m.Groups[2].Value
     $valueName = $m.Groups[3].Value
 
-    $plain = $m.Groups[4].Value
+    $rawDesc = $m.Groups[4].Value
+    $plain   = $rawDesc
+
+    # Check if this setting supports multiple comma-separated values
+    $multiValue = $rawDesc -match 'multiple values separated by commas'
+
+    # Extract enum options from a markdown table if present and not multi-value
+    $enumOptions = $null
+    if (-not $multiValue) {
+        $optRows = [System.Collections.Generic.List[hashtable]]::new()
+        foreach ($row in [regex]::Matches($rawDesc, '(?m)^\s*`([^`]+)`[^|\n]*\|([^|\n]+)')) {
+            $val = $row.Groups[1].Value
+            # Skip placeholder/template values (e.g. [guid], id://[guid])
+            if ($val -match '[\[\{]|//') { continue }
+            # Strip markdown from the description column
+            $desc = $row.Groups[2].Value.Trim() `
+                -replace '`([^`]+)`',              '$1' `
+                -replace '\*\*(.+?)\*\*',          '$1' `
+                -replace '(?<![_\w])_(.+?)_(?![_\w])', '$1' `
+                -replace '\\\[',                   '[' `
+                -replace '\\\]',                   ']' `
+                -replace '\[([^\]]+)\]\[[^\]]*\]', '$1' `
+                -replace '\[([^\]]+)\]\([^\)]*\)', '$1' `
+                -replace '<https?://[^>]+>',        ''
+            $optRows.Add(@{ Value = $val; Id = ($val -replace '[^A-Za-z0-9]', '_'); Display = "$val - $($desc.Trim())" })
+        }
+        if ($optRows.Count -ge 2) { $enumOptions = $optRows.ToArray() }
+    }
 
     # Strip fenced code blocks
     $plain = $plain -replace '(?ms)```[^`]*?```', ''
@@ -87,12 +114,10 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
     # Strip inline code markers, keeping the text
     $plain = $plain -replace '`([^`]+)`', '$1'
 
-    # Resolve reference-style links [text][ref]: keep HTTP URLs, drop relative ones
+    # Resolve reference-style links [text][ref]: include URL/path for all known links
     foreach ($ld in $linkDefs.GetEnumerator()) {
-        if ($ld.Value -match '^https?://') {
-            $escaped = [regex]::Escape($ld.Key)
-            $plain = $plain -replace "\[([^\]]+)\]\[$escaped\]", "`$1 ($($ld.Value))"
-        }
+        $escaped = [regex]::Escape($ld.Key)
+        $plain = $plain -replace "\[([^\]]+)\]\[$escaped\]", "`$1 ($($ld.Value))"
     }
     $plain = $plain -replace '\[([^\]]+)\]\[[^\]]*\]', '$1'
 
@@ -146,6 +171,7 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
         Category    = $category
         DisplayName = $displayName
         Explain     = $explainText
+        EnumOptions = $enumOptions
     })
 }
 
@@ -222,10 +248,27 @@ foreach ($s in $settings) {
     $xw.WriteEndElement()
 
     $xw.WriteStartElement('elements')
-    $xw.WriteStartElement('text')
-    $xw.WriteAttributeString('id', "$($s.PolicyName)_Text")
-    $xw.WriteAttributeString('valueName', $s.ValueName)
-    $xw.WriteEndElement()
+    if ($s.EnumOptions) {
+        $xw.WriteStartElement('enum')
+        $xw.WriteAttributeString('id', "$($s.PolicyName)_Enum")
+        $xw.WriteAttributeString('valueName', $s.ValueName)
+        foreach ($opt in $s.EnumOptions) {
+            $xw.WriteStartElement('item')
+            $xw.WriteAttributeString('displayName', "`$(string.$($s.PolicyName)_Enum_$($opt.Id))")
+            $xw.WriteStartElement('value')
+            $xw.WriteStartElement('string')
+            $xw.WriteString($opt.Value)
+            $xw.WriteEndElement()
+            $xw.WriteEndElement()
+            $xw.WriteEndElement()
+        }
+        $xw.WriteEndElement()
+    } else {
+        $xw.WriteStartElement('text')
+        $xw.WriteAttributeString('id', "$($s.PolicyName)_Text")
+        $xw.WriteAttributeString('valueName', $s.ValueName)
+        $xw.WriteEndElement()
+    }
     $xw.WriteEndElement()
 
     $xw.WriteEndElement()
@@ -265,6 +308,11 @@ foreach ($cat in $categories) {
 foreach ($s in $settings) {
     Write-AdmlString $xw $s.PolicyName $s.DisplayName
     Write-AdmlString $xw "$($s.PolicyName)_Explain" $s.Explain
+    if ($s.EnumOptions) {
+        foreach ($opt in $s.EnumOptions) {
+            Write-AdmlString $xw "$($s.PolicyName)_Enum_$($opt.Id)" $opt.Display
+        }
+    }
 }
 
 $xw.WriteEndElement() # stringTable
@@ -273,10 +321,18 @@ $xw.WriteStartElement('presentationTable')
 foreach ($s in $settings) {
     $xw.WriteStartElement('presentation')
     $xw.WriteAttributeString('id', $s.PolicyName)
-    $xw.WriteStartElement('textBox')
-    $xw.WriteAttributeString('refId', "$($s.PolicyName)_Text")
-    $xw.WriteElementString('label', "$($s.DisplayName):")
-    $xw.WriteEndElement()
+    if ($s.EnumOptions) {
+        $xw.WriteStartElement('dropdownList')
+        $xw.WriteAttributeString('refId', "$($s.PolicyName)_Enum")
+        $xw.WriteAttributeString('noSort', 'true')
+        $xw.WriteString("$($s.DisplayName):")
+        $xw.WriteEndElement()
+    } else {
+        $xw.WriteStartElement('textBox')
+        $xw.WriteAttributeString('refId', "$($s.PolicyName)_Text")
+        $xw.WriteElementString('label', "$($s.DisplayName):")
+        $xw.WriteEndElement()
+    }
     $xw.WriteEndElement()
 }
 $xw.WriteEndElement() # presentationTable
