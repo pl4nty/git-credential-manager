@@ -30,21 +30,9 @@ that can always be overridden by the user in the usual ways.
 Default setting values come from the Windows Registry, specifically the
 following keys:
 
-### 32-bit Windows
-
 ```text
 HKEY_LOCAL_MACHINE\SOFTWARE\GitCredentialManager\Configuration
 ```
-
-### 64-bit Windows
-
-```text
-HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\GitCredentialManager\Configuration
-```
-
-> GCM is a 32-bit executable on Windows. When running on a 64-bit
-installation of Windows registry access is transparently redirected to the
-`WOW6432Node` node.
 
 By using the Windows Registry, system administrators can use Group Policy to
 easily set defaults for GCM's settings.
@@ -54,6 +42,16 @@ those of the [Git configuration][config] settings.
 
 The type of each registry key can be either `REG_SZ` (string) or `REG_DWORD`
 (integer).
+
+### 32-bit / x86
+
+When running the 32-bit (x86) version of GCM on a 64-bit (x64 or ARM64)
+installation of Windows, the registry access is transparently redirected to
+the `WOW6432Node` node.
+
+```text
+HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\GitCredentialManager\Configuration
+```
 
 ## macOS
 
@@ -88,7 +86,36 @@ $ defaults read git-credential-manager configuration
 
 ## Linux
 
-Default configuration setting stores has not been implemented.
+Default settings values come from the `/etc/git-credential-manager/config.d`
+directory. Each file in this directory represents a single settings dictionary.
+
+All files in this directory are read at runtime and merged into a single
+collection of settings, in the order they are read from the file system.
+To provide a stable ordering, it is recommended to prefix each filename with a
+number, e.g. `42-my-settings`.
+
+The format of each file is a simple set of key/value pairs, separated by an
+`=` sign, and each line separated by a line-feed (`\n`, LF) character.
+Comments are identified by a `#` character at the beginning of a line.
+
+For example:
+
+```text
+# /etc/git-credential-manager/config.d/00-example1
+credential.noguiprompt=0
+```
+
+```text
+# /etc/git-credential-manager/config.d/01-example2
+credential.trace=true
+credential.traceMsAuth=true
+```
+
+All settings names and values are the same as the [Git configuration][config]
+reference.
+
+> Note: These files are read once at startup. If changes are made to these files
+they will not be reflected in an already running process.
 
 [environment]: environment.md
 [config]: configuration.md

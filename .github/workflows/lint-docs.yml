@@ -18,9 +18,9 @@ jobs:
     name: Lint markdown files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: DavidAnson/markdownlint-cli2-action@eb5ca3ab411449c66620fe7f1b3c9e10547144b0
+      - uses: DavidAnson/markdownlint-cli2-action@07035fd053f7be764496c0f8d8f9f41f98305101
         with:
           globs: |
             "**/*.md"
@@ -30,13 +30,12 @@ jobs:
     name: Check for broken links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run link checker
         # For any troubleshooting, see:
         # https://github.com/lycheeverse/lychee/blob/master/docs/TROUBLESHOOTING.md
-        uses: lycheeverse/lychee-action@f81112d0d2814ded911bd23e3beaa9dda9093915
-
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411
         with:
           # user-agent: if a user agent is not specified, some websites (e.g.
           # GitHub Docs) return HTTP errors which Lychee will interpret as
