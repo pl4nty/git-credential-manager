@@ -62,6 +62,12 @@ function Write-AdmlString {
 $content = Get-Content -LiteralPath $ConfigurationMd -Raw
 $settings = [System.Collections.Generic.List[hashtable]]::new()
 
+# Build a map of link-reference -> URL from the document footer
+$linkDefs = @{}
+foreach ($ld in [regex]::Matches($content, '(?m)^\[([^\]]+)\]:\s*(\S+)')) {
+    $linkDefs[$ld.Groups[1].Value.ToLower()] = $ld.Groups[2].Value
+}
+
 # Match any namespace.setting heading plus the description paragraph that
 # immediately follows it (up to the first subheading, horizontal rule, or EOF).
 $pattern = '(?ms)^### ((\w+)\.(\S+?))(?:\s+_\([^)]+\)_)* *\n\n(.*?)(?=\n####|\n---|\Z)'
@@ -70,20 +76,47 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
     $namespace = $m.Groups[2].Value
     $valueName = $m.Groups[3].Value
 
-    $plain = $m.Groups[4].Value `
-        -replace '(?ms)```[^`]*?```', '' `
-        -replace '`([^`]+)`',              '$1' `
-        -replace '\[([^\]]+)\]\[[^\]]*\]', '$1' `
-        -replace '\[([^\]]+)\]\([^\)]*\)', '$1' `
-        -replace '<https?://[^>]+>',       '' `
-        -replace '\\\[',                   '[' `
-        -replace '\\\]',                   ']' `
-        -replace '\*\*(.+?)\*\*',          '$1' `
-        -replace '(?<!\*)\*(.+?)(?<!\*)\*(?!\*)', '$1' `
-        -replace '(?<![_\w])_(.+?)_(?![_\w])',    '$1' `
-        -replace '(?m)^> ?',               '' `
-        -replace '(?m)^[\-|: ]+$',         '' `
-        -replace '\|',                     ': '
+    $plain = $m.Groups[4].Value
+
+    # Strip fenced code blocks
+    $plain = $plain -replace '(?ms)```[^`]*?```', ''
+
+    # Strip table header rows (plain word|word lines with no backticks) before pipe processing
+    $plain = $plain -replace '(?m)^[A-Za-z][\w ]*(\|[\w ]+)+\s*$', ''
+
+    # Strip inline code markers, keeping the text
+    $plain = $plain -replace '`([^`]+)`', '$1'
+
+    # Resolve reference-style links [text][ref]: keep HTTP URLs, drop relative ones
+    foreach ($ld in $linkDefs.GetEnumerator()) {
+        if ($ld.Value -match '^https?://') {
+            $escaped = [regex]::Escape($ld.Key)
+            $plain = $plain -replace "\[([^\]]+)\]\[$escaped\]", "`$1 ($($ld.Value))"
+        }
+    }
+    $plain = $plain -replace '\[([^\]]+)\]\[[^\]]*\]', '$1'
+
+    # Resolve inline links [text](url): keep HTTP URLs, drop relative ones
+    $plain = [regex]::Replace($plain, '\[([^\]]+)\]\(([^\)]*)\)', {
+        param($match)
+        $text = $match.Groups[1].Value
+        $url  = $match.Groups[2].Value
+        if ($url -match '^https?://') { return "$text ($url)" }
+        return $text
+    })
+
+    # Preserve bare autolinks <https://...>
+    $plain = $plain -replace '<(https?://[^>]+)>', '$1'
+
+    $plain = $plain `
+        -replace '\\\[',                              '[' `
+        -replace '\\\]',                              ']' `
+        -replace '\*\*(.+?)\*\*',                    '$1' `
+        -replace '(?<!\*)\*(.+?)(?<!\*)\*(?!\*)',    '$1' `
+        -replace '(?<![_\w])_(.+?)_(?![_\w])',       '$1' `
+        -replace '(?m)^> ?',                         '' `
+        -replace '(?m)^[\-|: ]+$',                   '' `
+        -replace '\|',                               ': '
     $plain = ($plain -split '\r?\n' | ForEach-Object { $_.TrimEnd() }) -join "`n"
     $plain = [regex]::Replace($plain, '\n{3,}', "`n`n").Trim()
 
@@ -98,15 +131,18 @@ foreach ($m in [regex]::Matches($content, $pattern)) {
         "GCM_$($valueName -replace '[^A-Za-z0-9]', '_')"
     }
 
-    $displayName = [regex]::Replace($valueName, '(?<=[a-z0-9])(?=[A-Z])', ' ')
+    # Split camelCase on lowercase-to-uppercase boundaries only (not digit-to-uppercase)
+    $displayName = [regex]::Replace($valueName, '(?<=[a-z])(?=[A-Z])', ' ')
     $displayName = $displayName.Substring(0,1).ToUpper() + $displayName.Substring(1)
+    # Preserve known compound brand names that camelCase splitting would break
+    $displayName = $displayName -replace '\bGit Hub\b', 'GitHub' -replace '\bGit Lab\b', 'GitLab'
 
     $matched  = $categories | Where-Object { $_.Pattern -and $fullKey -match $_.Pattern } | Select-Object -First 1
     $category = if ($matched) { $matched.Name } else { 'GCM_General' }
 
     $settings.Add(@{
         PolicyName  = $policyName
-        ValueName   = $valueName
+        ValueName   = $fullKey
         Category    = $category
         DisplayName = $displayName
         Explain     = $explainText
