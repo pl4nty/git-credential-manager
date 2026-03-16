@@ -173,6 +173,7 @@ foreach ($s in $settings) {
     $xw.WriteAttributeString('class', 'Machine')
     $xw.WriteAttributeString('displayName', "`$(string.$($s.PolicyName))")
     $xw.WriteAttributeString('explainText', "`$(string.$($s.PolicyName)_Explain)")
+    $xw.WriteAttributeString('presentation', "`$(presentation.$($s.PolicyName))")
     $xw.WriteAttributeString('key', $REGISTRY_KEY)
     $xw.WriteAttributeString('valueName', $s.ValueName)
 
@@ -230,9 +231,22 @@ foreach ($s in $settings) {
     Write-AdmlString $xw "$($s.PolicyName)_Explain" $s.Explain
 }
 
-$xw.WriteEndElement()
-$xw.WriteEndElement()
-$xw.WriteEndElement()
+$xw.WriteEndElement() # stringTable
+
+$xw.WriteStartElement('presentationTable')
+foreach ($s in $settings) {
+    $xw.WriteStartElement('presentation')
+    $xw.WriteAttributeString('id', $s.PolicyName)
+    $xw.WriteStartElement('textBox')
+    $xw.WriteAttributeString('refId', "$($s.PolicyName)_Text")
+    $xw.WriteElementString('label', "$($s.DisplayName):")
+    $xw.WriteEndElement()
+    $xw.WriteEndElement()
+}
+$xw.WriteEndElement() # presentationTable
+
+$xw.WriteEndElement() # resources
+$xw.WriteEndElement() # policyDefinitionResources
 $xw.WriteEndDocument()
 $xw.Flush()
 $xw.Close()
